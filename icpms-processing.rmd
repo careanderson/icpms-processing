@@ -1,0 +1,100 @@
+---
+title: "ICP Data Processing"
+author: "CGA"
+date: "May 22, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(gtools)
+setwd("~/R/R_ICP_processing/") #set the working directory
+```
+
+# Notes:
+* Goal: rearrange the raw ICP data into usable form
+* The first 10 qc's measured as "UNK" are blanks (I changed this in the raw file from Mariela)
+* The rest of the QC are 750ppb (in the raw file from Mariela)
+* Treat blanks and controls as samples (i.e. keep them in the sample data sheet)
+
+## 1. Read in raw ICP data
+```{r}
+icp <- read_excel("Mariela050117_rawdata_water.xlsx") #input your datafile
+icp.dbn <- subset(icp, `Analysis Condition` %in% "DBN") #subsetting the DBN data
+```
+
+## 2. Manipulate ICP data
+```{r}
+#Remove extraneous columns
+keeps <- c("Sample Name","Date/Time","Element", "Class", "Mass",
+           #"Conc.[1]","Conc.[2]","Conc.[3]",
+           "Conc.[Ave.]","Conc.[SD]","Conc.[RSD]",
+           #"Intensity[1]","Intensity[2]","Intensity[3]",
+           "Intensity[Ave.]","Intensity[SD]","Intensity[RSD]")
+icp.dbn.subset <- icp.dbn[, names(icp.dbn) %in% keeps]
+
+#Add column with Element and Mass (e.g., Fe_56)
+icp.dbn.subset$Element_Mass <- paste(icp.dbn.subset$Element, icp.dbn.subset$Mass, sep="")
+
+#Subset the samples
+icp_samp <- subset(icp.dbn.subset, Class %in% "UNK")
+
+#Remove Class, Element, and Mass columns
+icp_samp <- subset(icp_samp, select = -c(Class, Element, Mass))
+
+#Subset into the different elements and mass isotopes
+icp_al27 <- subset(icp_samp, Element_Mass %in% "Al27")
+icp_fe56 <- subset(icp_samp, Element_Mass %in% "Fe56")
+icp_fe57 <- subset(icp_samp, Element_Mass %in% "Fe57")
+icp_si28 <- subset(icp_samp, Element_Mass %in% "Si28")
+icp_si29 <- subset(icp_samp, Element_Mass %in% "Si29")
+
+#Add prefixes to column names, based on element, delete Element column
+dflist <- list(df1=icp_al27, df2=icp_fe56, df3=icp_fe57, df4=icp_si28, df5=icp_si29)
+
+l <- lapply(dflist, function(df) {
+  colnames(df)[c(3:8)] <- paste(df$Element_Mass[1], colnames(df)[c(3:8)], sep = "_")
+  df <- subset(df, select = -c(Element_Mass))
+  return(df)
+  }
+)
+
+#Merge all isotopes into a single dataframe
+icp_total <- Reduce(function(x, y) merge(x, y, all=TRUE), l)
+
+#Sort by Date/Time
+icp_total <- icp_total[with(icp_total, order(`Date/Time`)),]
+
+#Write to new csv file
+write.csv(icp_total, file="24May2017_ICP_samples.csv")
+```
+
+## 3. Calibration curves
+```{r}
+#Subset the calibration standards
+icp_cal <- subset(icp.dbn.subset, !(Class %in% "UNK"))
+
+#Remove extraneous columns
+drops <- c("Class","Conc.[Ave.]","Conc.[SD]","Conc.[RSD]","Analysis Condition","Element_Mass")
+icp_cal <- icp_cal[, !(names(icp_cal) %in% drops)]
+
+#Sort by Element/Mass
+icp_cal <- icp_cal[with(icp_cal, order(Element, Mass)),]
+
+#Write to new csv file
+write.csv(icp_cal, file="24May2017_ICP_calibration.csv")
+```
+
+## 4. Exploratory plots
+```{r}
+#Histogram of concentrations for Al, Fe, Si
+ggplot(icp_samp, aes(x=`Conc.[Ave.]`)) +
+  geom_histogram() +
+  facet_wrap(~Element_Mass, scales="free")
+```
