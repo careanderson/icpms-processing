@@ -1,0 +1,154 @@
+---
+title: "Enzyme Data Processing"
+author: "CGA"
+date: "May 30, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(gtools)
+library(tidyr)
+setwd("~/R/Enzymes/") #set the working directory
+```
+
+## 1. Read in raw enzyme data from spec
+```{r}
+# Morris' reactor experiment:
+vars <- c("Name","Abs<460nm>")
+perox.mj <- read_excel("MnP-Assay.xls")[vars]
+phenox.mj <- read_excel("Ph-Oxidase-Assay.xls")[vars]
+perox.blanks.mj <- read_excel("26May2017_perox_blanks.xls")[-c(1,2),vars]
+phenox.blanks.mj <- read_excel("26May2017_phox_samples2_blanks.xls")[c(75:110),vars] #deleting the re-run samples
+
+# Change sample names to uppercase
+perox.mj$Name <- toupper(perox.mj$Name)
+phenox.mj$Name <- toupper(phenox.mj$Name)
+perox.blanks.mj$Name <- toupper(perox.blanks.mj$Name)
+phenox.blanks.mj$Name <- toupper(phenox.blanks.mj$Name)
+
+```
+
+## 2. Process enzyme data from Morris' reactor experiment
+```{r}
+# All "blanks" in perox.mj and phenox.mj are actually sample reps. So, delete "blank" and calculate average for each sample.
+perox.mj["Name"] <- lapply(perox.mj["Name"], gsub, pattern=" BLANK", replacement="", fixed=TRUE)
+phenox.mj["Name"] <- lapply(phenox.mj["Name"], gsub, pattern=" BLANK", replacement="", fixed=TRUE)
+
+# Averaging the samples with the same names in perox.mj and phenox.mj
+# Remove the "replicate" numbers
+phenox.mj$Name[-c(1:2)] <- gsub('.{1}$', '', phenox.mj$Name[-c(1:2)])
+perox.mj$Name[-c(1:2)] <- gsub('.{1}$', '', perox.mj$Name[-c(1:2)])
+
+phenox.mj$Name <- as.factor(phenox.mj$Name)
+colnames(phenox.mj)[2] <- "phenox"
+#phenox.mj.sum <- phenox.mj %>%
+#  group_by(Name) %>%
+#  summarize(phenox.mean=mean(`Abs<460nm>`), phenox.sd=sd(`Abs<460nm>`))
+
+perox.mj$Name <- as.factor(perox.mj$Name)
+colnames(perox.mj)[2] <- "perox"
+#perox.mj.sum <- perox.mj %>% 
+#  group_by(Name) %>%
+#  summarize(perox.mean=mean(`Abs<460nm>`), perox.sd=sd(`Abs<460nm>`))
+
+# Sample blanks
+# For sample blanks, change absorbance column to "blank"
+colnames(phenox.blanks.mj)[2] <- "phenox.blank"
+colnames(perox.blanks.mj)[2] <- "perox.blank"
+# If negative --> 0? [same with all other samples...]
+
+# Remove "SB" and rep number
+phenox.blanks.mj$Name <- gsub('.{4}$', '', phenox.blanks.mj$Name)
+perox.blanks.mj$Name <- gsub('.{4}$', '', perox.blanks.mj$Name)
+
+phenox.blanks.mj$Name <- as.factor(phenox.blanks.mj$Name)
+#phenox.blanks.sum <- phenox.blanks.mj %>% 
+#  group_by(Name) %>%
+#  summarize(phenox.blank.mean=mean(blank), phenox.blank.sd=sd(blank))
+
+perox.blanks.mj$Name <- as.factor(perox.blanks.mj$Name)
+#perox.blanks.sum <- perox.blanks.mj %>% 
+#  group_by(Name) %>%
+#  summarize(perox.blank.mean=mean(blank), perox.blank.sd=sd(blank))
+
+# Merge sample blanks with samples
+# Sort the dataframes by Name
+phenox.mj <- with(phenox.mj,  phenox.mj[order(Name) , ])
+perox.mj <- with(perox.mj,  perox.mj[order(Name) , ])
+phenox.blanks.mj <- with(phenox.blanks.mj,  phenox.blanks.mj[order(Name) , ])
+perox.blanks.mj <- with(perox.blanks.mj,  perox.blanks.mj[order(Name) , ])
+
+# Do the columns match?
+identical(phenox.mj$Name, perox.mj$Name)
+identical(phenox.blanks.mj$Name, perox.blanks.mj$Name)
+
+# Merge
+total.mj <- cbind(phenox.mj, perox.mj)
+total.mj <- total.mj[-3]
+total.mj <- total.mj %>%
+  separate(Name, c("Sample", "Location"), sep="-")
+
+# Melt
+total.mj.melt <- melt(total.mj, id.vars=c("Sample","Location"))
+total.mj.melt <- total.mj.melt[complete.cases(total.mj.melt),] #removing substrate and buffer blanks
+
+# Sample blanks in same format (in triplicate, so I'll average these)
+total.blanks.mj <- cbind(phenox.blanks.mj, perox.blanks.mj)
+total.blanks.mj <- total.blanks.mj[-3]
+total.blanks.mj <- total.blanks.mj %>% 
+  group_by(Name) %>%
+  summarize(phenox.blank.mean=mean(phenox.blank), perox.blank.mean=mean(perox.blank))
+total.blanks.mj <- total.blanks.mj %>%
+  separate(Name, c("Sample", "Location"), sep="-")
+
+# Subtracting sample blanks (averages) from each sample reading
+# First, expand "total.blanks.mj" so each Sample/Location is repeated 6 times
+blanks.expand <- total.blanks.mj[rep(seq_len(nrow(total.blanks.mj)), each=6),]
+blanks.melt <- melt(blanks.expand, id.vars=c("Sample","Location"))
+colnames(blanks.melt)[4] <- "blank"
+
+# Do the columns match?
+identical(blanks.melt$Sample, total.mj.melt$Sample)
+identical(blanks.melt$Location, total.mj.melt$Location)
+
+# Merge and subtract blanks
+total.mj.melt$blanks <- blanks.melt$blank
+total.mj.melt$total <- total.mj.melt$value - total.mj.melt$blanks
+
+# Merge doesn't work:
+#total.mj <- merge(phenox.mj, perox.mj, all=TRUE)
+#total.mj <- merge(total.mj, phenox.blanks.mj, all=TRUE)
+#total.mj <- merge(total.mj, perox.blanks.mj, all=TRUE)
+
+```
+
+## 3. Exploratory plots for Morris' reactor experiments
+```{r}
+levels(total.mj.melt$variable)
+levels(total.mj.melt$variable) <- c("phenol oxidase","peroxidase")
+
+total.mj.melt$Location <- as.factor(total.mj.melt$Location)
+levels(total.mj.melt$Location)
+levels(total.mj.melt$Location) <- c("bottom","middle","top")
+
+ggplot(total.mj.melt, aes(x=Sample, y=total, fill=Location)) +
+  geom_boxplot() +
+  ylab("Absorbance (460nm)") + xlab("Treatment") +
+  theme(axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 14),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size=14),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.text.x = element_text(size = 14)) +
+  facet_wrap(~variable, scales="free")
+
+```
