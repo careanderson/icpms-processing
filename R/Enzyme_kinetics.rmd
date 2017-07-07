@@ -1,0 +1,159 @@
+---
+title: "Enzyme_kinetics"
+author: "CGA"
+date: "June 1, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(readxl)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(gtools)
+library(tidyr)
+setwd("~/R/Enzymes/") #set the working directory
+```
+
+## 1. Read in raw enzyme data from spec
+```{r}
+# Enzyme kinetics experiment (keeping Name and 460nm)
+vars <- c("Name","Abs<460nm>")
+kin.t0.t1 <- read_excel("30May2017_enzymes_T1_T0.xls")[vars]
+kin.t2 <- read_excel("30May2017_enzymes_T2.xls")[vars]
+kin.t4 <- read_excel("30May2017_enzymes_T4.xls")[vars]
+kin.t8 <- read_excel("30May2017_enzymes_T8.xls")[vars]
+kin.t12 <- read_excel("30May2017_enzymes_T12.xls")[vars]
+kin.t24 <- read_excel("30May2017_Enzymes_T24.xls")[vars]
+
+# Change sample names to uppercase
+kin.t0.t1$Name <- toupper(kin.t0.t1$Name)
+kin.t2$Name <- toupper(kin.t2$Name)
+kin.t4$Name <- toupper(kin.t4$Name)
+kin.t8$Name <- toupper(kin.t8$Name)
+kin.t12$Name <- toupper(kin.t12$Name)
+kin.t24$Name <- toupper(kin.t24$Name)
+
+```
+
+## 2. Process enzyme kinetics data
+```{r}
+# Split the "Name" into Sample, Time, Assay, Rep; then summarize by assay.
+
+# Controls
+kin.t0.t1 <- kin.t0.t1 %>%
+  separate(Name, c("Sample", "Time", "Assay", "Rep"), sep="-")
+kin.t0 <- subset(kin.t0.t1, Time %in% 0)
+kin.t1 <- subset(kin.t0.t1, Time %in% 1)
+controls <- kin.t0.t1[grepl("blank", kin.t0.t1$Sample),]
+controls <- subset(controls, select = -c(Time, Rep)) #need to list pe/ph under assay for these substrate blanks!
+
+# T0
+kin.t0 <- subset(kin.t0, select = -c(Time, Rep))
+kin.t0.sum <- kin.t0 %>%
+  group_by(Sample, Assay) %>%
+  summarize(mean=mean(`Abs<460nm>`))
+kin.t0.sum$Time <- 0
+
+# T1
+kin.t1 <- subset(kin.t1, select = -c(Time, Rep))
+kin.t1.sum <- kin.t1 %>%
+  group_by(Sample, Assay) %>%
+  summarize(mean=mean(`Abs<460nm>`))
+kin.t1.sum$Time <- 1.5
+
+# T2
+kin.t2 <- kin.t2 %>%
+  separate(Name, c("Sample", "Time", "Assay", "Rep"), sep="-")
+kin.t2 <- subset(kin.t2, select = -c(Time, Rep))
+kin.t2.sum <- kin.t2 %>%
+  group_by(Sample, Assay) %>%
+  summarize(mean=mean(`Abs<460nm>`))
+kin.t2.sum$Time <- 2.5
+
+# T4
+kin.t4 <- kin.t4 %>%
+  separate(Name, c("Sample", "Time", "Assay", "Rep"), sep="-")
+kin.t4 <- subset(kin.t4, select = -c(Time, Rep))
+kin.t4.sum <- kin.t4 %>%
+  group_by(Sample, Assay) %>%
+  summarize(mean=mean(`Abs<460nm>`))
+kin.t4.sum$Time <- 4.5
+
+# T8
+kin.t8 <- kin.t8 %>%
+  separate(Name, c("Sample", "Time", "Assay", "Rep"), sep="-")
+kin.t8 <- subset(kin.t8, select = -c(Time, Rep))
+kin.t8.sum <- kin.t8 %>%
+  group_by(Sample, Assay) %>%
+  summarize(mean=mean(`Abs<460nm>`))
+kin.t8.sum$Time <- 8.5
+
+# T12
+kin.t12 <- kin.t12 %>%
+  separate(Name, c("Sample", "Time", "Assay", "Rep"), sep="-")
+kin.t12 <- subset(kin.t12, select = -c(Time, Rep))
+kin.t12.sum <- kin.t12 %>%
+  group_by(Sample, Assay) %>%
+  summarize(mean=mean(`Abs<460nm>`))
+kin.t12.sum$Time <- 17
+
+# T24
+kin.t24$Name[13] <- "OM-24-Pe-1" #changing name to read 24hrs (it was labeled a 12-hr sample but was read at 24-hr)
+kin.t24 <- kin.t24 %>%
+  separate(Name, c("Sample", "Time", "Assay", "Rep"), sep="-")
+kin.t24 <- subset(kin.t24, select = -c(Time, Rep))
+kin.t24.sum <- kin.t24 %>%
+  group_by(Sample, Assay) %>%
+  summarize(mean=mean(`Abs<460nm>`))
+kin.t24.sum$Time <- 24 #or 24.5? Check with undergrads.
+
+```
+
+## 3. Exploratory plots for enzyme kinetics
+```{r}
+# First, rbind the dataframes
+total <- rbind(kin.t0.sum, kin.t1.sum, kin.t2.sum, kin.t4.sum, kin.t8.sum, kin.t12.sum, kin.t24.sum)
+total$Sample <- as.factor(total$Sample)
+total$Assay <- as.factor(total$Assay)
+
+# Subset the 2 assays
+total.pe <- subset(total, Assay %in% "PE")
+total.pe <- subset(total.pe, !(Sample %in% c("ALM","OLM"))) #removing samples with only 1 timepoint reading
+
+total.ph <- subset(total, Assay %in% "PH")
+total.ph <- subset(total.ph, !(Sample %in% c("A","AM","O"))) #removing samples with only 1 timepoint reading
+
+
+ggplot(total.pe, aes(x=Time, y=mean)) +
+  geom_point() +
+  geom_line() +
+#  geom_smooth() +
+  ggtitle("Peroxidase assay") + ylab("Absorbance (460 nm)") + xlab("Time (hour)") +
+  theme(axis.text = element_text(size = 10),
+        axis.title = element_text(size = 10),
+        plot.title = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size=10),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.text.x = element_text(size = 10)) +
+  facet_wrap(~Sample, scales="free")
+
+ggplot(total.ph, aes(x=Time, y=mean)) +
+  geom_point() +
+  geom_line() +
+#  geom_smooth() +
+  ggtitle("Phenol oxidase assay") + ylab("Absorbance (460 nm)") + xlab("Time (hour)") +
+  theme(axis.text = element_text(size = 10),
+        axis.title = element_text(size = 10),
+        plot.title = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size=10),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.text.x = element_text(size = 10)) +
+  facet_wrap(~Sample, scales="free")
+
+```
